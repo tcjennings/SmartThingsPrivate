@@ -98,7 +98,7 @@ def periodicVentilation() {
 		onoff.on()
 		hilo.off()
 		// Using the 'pminutes' input, schedule a time to turn off the ERV
-		runIn(60 * pminutes, turnOffERV)
+		runIn(60 * findRunTime(), turnOffERV)
 	} else {
 		log.debug("Dew Point is too high for ventilation.")
 		if (onoff.currentSwitch == "on" ) { turnOffERV() }
@@ -135,6 +135,12 @@ def getCurrentDewPoint() {
 
 def getDewPointThreshold() {
 	(dewpoint != null && dewpoint !="") ? dewpoint : 70
+}
+
+//Validate runtime in minutes
+private findRunTime() {
+	(pminutes > 60) ? 60 : pminutes
+	(pminutes < 1 ) ? 1 : pminutes
 }
 
 def getWebForecast() {
