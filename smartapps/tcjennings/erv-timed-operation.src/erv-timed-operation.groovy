@@ -30,7 +30,7 @@ definition(
 
 preferences {
 	section("ERV Switches") {
-		input "onoff", "capability.switch", 
+		input "erv", "capability.switch", 
 		title: "Which ERV On/Off switch?", multiple: false
 		
 		input "hilo", "capability.switch",
@@ -86,7 +86,7 @@ def routineChanged(evt) {
 
 def turnOffERV() {
 	log.debug "Turning off ERV switches."
-	onoff.off()
+	erv.off()
 	hilo.off()
 }
 
@@ -95,13 +95,13 @@ def periodicVentilation() {
 	// Check outdoor Dew Point, and if it is above threshold, don't turn on the ERV.
 	if ( getCurrentDewPoint() < getDewPointThreshold() ) {
 		// turn on the ERV's low-speed mode.
-		onoff.on()
+		erv.on()
 		hilo.off()
 		// Using the 'pminutes' input, schedule a time to turn off the ERV
 		runIn(60 * findRunTime(), turnOffERV)
 	} else {
 		log.debug("Dew Point is too high for ventilation.")
-		if (onoff.currentSwitch == "on" ) { turnOffERV() }
+		if (erv.currentSwitch == "on" ) { turnOffERV() }
 		return false
 	}
 }
