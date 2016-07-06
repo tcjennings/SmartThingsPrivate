@@ -22,7 +22,11 @@ definition(
     iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
     iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
     iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png"
-)
+) {
+	appSetting "esHost"
+	appSetting "esIndex"
+	appSetting "esType"
+}
 
 
 preferences {
@@ -61,20 +65,19 @@ def initialize() {
 
 def sendCommand(json) {
   def headers = [:] //an empty map
-  headers.put("HOST", "192.168.1.179:9200")
+  headers.put("HOST", "${appSettings.esHost}:9200")
   headers.put("Content-Type", "application/x-www-form-urlencoded")
 
-	//Send this json to Elasticsearch
+  //Send this json to Elasticsearch
   def result = new physicalgraph.device.HubAction(
     method: "POST",
-    path: "/smartthings/event",
+    path: "/${appSettings.esIndex}/${appSettings.esType}",
     headers: headers,
     body: json.toString()
-	)
-    //log.debug(result)
+  )
     
-    sendHubCommand(result)
-    return result
+  sendHubCommand(result)
+  return result
 }
 
 def sensorHandler(evt) {
