@@ -21,17 +21,36 @@ definition(
     category: "Green Living",
     iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
     iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
-    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png")
-
+    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png"
+) {
+	appSetting "apikey"
+	appSetting "latitude"
+	appSetting "longitude"
+}
 
 preferences {
 	section("ERV Switches") {
-		input "switches", "capability.switch", 
-		title: "Which ERV switches?", multiple: true
+		input "onoff", "capability.switch", 
+		title: "Which ERV On/Off switch?", multiple: false
+		
+		input "hilo", "capability.switch",
+		title: "Which ERV Low/High switch?", multiple:false
 	}
 	
-	section("Timer Duration") {
+	section("Routine Timer Duration") {
 		input "minutes", "number", required: true, title: "How Long (minutes)?"
+	}
+
+	section("Periodic Timer Duration") {
+		input "pminutes", "number", required: true, title: "How Long (minutes < 60)?"
+	}
+    
+	section("Outdoor Conditions") {
+		input "outdoor", "capability.relativeHumidityMeasurement",
+			required: true, title: "Which Outdoor temp/humidity sensor?"
+		
+		input "dewpoint", "number", required: false,
+			title: "Dew Point Threshold (default 70)?"
 	}
 }
 
@@ -44,27 +63,111 @@ def installed() {
 def updated() {
 	log.debug "Updated with settings: ${settings}"
 
+	unschedule()
 	unsubscribe()
 	initialize()
 }
 
 def initialize() {
+	getWebForecast()
+	runEvery1Hour(periodicVentilation)
 	subscribe(location, "routineExecuted", routineChanged)
+	subscribe(outdoor, "temperature", outdoorHandler)
+	subscribe(outdoor, "humidity", outdoorHandler)
 }
 
 def routineChanged(evt) {
 	if (evt.displayName == "ERV Ventilation") {
 		log.debug "${evt.descriptionText}"
 		def operationTime = minutes * 60 //n minutes * 60 seconds
-		runIn( operationTime, turnOffERV)
+		runIn(operationTime, turnOffERV)
 	}
 }
 
 def turnOffERV() {
-	switches.each {
-    	log.debug "Turning off ${it}."
-		it.off()
+	log.debug "Turning off ERV switches."
+	onoff.off()
+	hilo.off()
+}
+
+def periodicVentilation() {
+
+	// Check outdoor Dew Point, and if it is above threshold, don't turn on the ERV.
+	if ( getCurrentDewPoint() < getDewPointThreshold() ) {
+		// turn on the ERV's low-speed mode.
+		onoff.on()
+		hilo.off()
+		// Using the 'pminutes' input, schedule a time to turn off the ERV
+		runIn(60 * pminutes, turnOffERV)
+	} else {
+		log.debug("Dew Point is too high for ventilation.")
+		if (onoff.currentSwitch == "on" ) { turnOffERV() }
+		return false
 	}
 }
 
+def outdoorHandler(evt) {
+	//Calculate dew point
+    def T = outdoor.currentValue("temperature")
+    def RH = outdoor.currentValue("humidity")
+    def DP = T - ( 9/25 * (100-RH) )
+    log.debug("Current outdoor Dew Point is $DP")
+    
+    state.dewpoint = DP
+    state.outtemp = T
+    state.outrh = RH
+    state.lastForecast = now() / 1000
+    state.forecastSource = "Sensor"
+}
+
+def getCurrentDewPoint() {
+	def lastForecast = state.lastForecast
+	def staleThreshold = ( now() / 1000 ) - ( 60 * 45 )
+	def DP
+	if ( lastForecast < staleThreshold ) {
+		DP = getWebForecast()
+	} else {
+		DP = state.dewpoint
+	}
+	
+	DP
+}
+
+def getDewPointThreshold() {
+	(dewpoint != null && dewpoint !="") ? dewpoint : 70
+}
+
+def getWebForecast() {
+	def forecastURL = "https://api.forecast.io/forecast/${appSetting.apikey}/${appSetting.latitude}/${appSetting.longitude}"
+	def responseTime
+	def responseDewPoint
+	def responseTemp
+	def responseRH
+	
+	log.debug "Checking Forecast.io weather"
+
+	httpGet(forecastURL) { response ->
+		if (response.data) {
+			responseTime = response.data.currently.time.intValue()
+			responseDewPoint = response.data.currently.dewPoint.floatValue()
+			responseTemp = response.data.currently.temperature.floatValue()
+			responseRH = response.data.currently.humidity.floatValue()
+			
+			state.lastForecast = responseTime
+			state.forecastSource = "Web"
+			
+			state.dewpoint = responseDewPoint
+			state.outtemp = responseTemp
+			state.outrh = responseRH
+		} else {
+			responseDewPoint = 100
+			
+			state.forecastSource = "Unavailable"
+			state.dewpoint = responseDewPoint
+			
+			log.debug "HttpGet Response data unsuccessful"
+		}
+	}
+	responseDewPoint
+}
 
