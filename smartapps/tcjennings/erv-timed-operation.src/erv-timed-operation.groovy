@@ -92,8 +92,9 @@ def turnOffERV() {
 
 def periodicVentilation() {
 
+	def DP = getCurrentDewPoint()
 	// Check outdoor Dew Point, and if it is above threshold, don't turn on the ERV.
-	if ( getCurrentDewPoint() < getDewPointThreshold() ) {
+	if ( DP < getDewPointThreshold() ) {
 		// turn on the ERV's low-speed mode.
 		erv.on()
 		hilo.off()
@@ -101,6 +102,7 @@ def periodicVentilation() {
 		runIn(60 * findRunTime(), turnOffERV)
 	} else {
 		log.debug("Dew Point is too high for ventilation.")
+        sendPush("Dew Point is ${DP}, not ventilating this hour.")
 		if (erv.currentSwitch == "on" ) { turnOffERV() }
 		return false
 	}
@@ -125,6 +127,7 @@ def getCurrentDewPoint() {
 	def staleThreshold = ( now() / 1000 ) - ( 60 * 45 )
 	def DP
 	if ( lastForecast < staleThreshold ) {
+    	sendPush("Application state is stale.")
 		DP = getWebForecast()
 	} else {
 		DP = state.dewpoint
@@ -144,13 +147,13 @@ private findRunTime() {
 }
 
 def getWebForecast() {
-	def forecastURL = "https://api.forecast.io/forecast/${appSetting.apikey}/${appSetting.latitude}/${appSetting.longitude}"
+	def forecastURL = "https://api.forecast.io/forecast/${appSettings.apikey}/${appSettings.latitude},${appSettings.longitude}"
 	def responseTime
 	def responseDewPoint
 	def responseTemp
 	def responseRH
 	
-	log.debug "Checking Forecast.io weather"
+	log.debug "Checking Forecast.io weather."
 
 	httpGet(forecastURL) { response ->
 		if (response.data) {
@@ -172,6 +175,7 @@ def getWebForecast() {
 			state.dewpoint = responseDewPoint
 			
 			log.debug "HttpGet Response data unsuccessful"
+            sendPush("API call to Forecast.io didn't return data.")
 		}
 	}
 	responseDewPoint
