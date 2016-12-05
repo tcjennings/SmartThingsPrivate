@@ -23,9 +23,10 @@ definition(
     iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
     iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png"
 ) {
-	appSetting "esHost"
-	appSetting "esIndex"
-	appSetting "esType"
+	appSetting "dbHost"
+	appSetting "dbIndex"
+	appSetting "dbType"
+    appSetting "dbPort"
 }
 
 
@@ -39,6 +40,20 @@ preferences {
 
     section("Select Switches") {
         input "switches", "capability.switch", required: true,  multiple: true, title: "Switches:"
+    }
+
+    section("Select Contact") {
+            input "contact", "capability.contactSensor", title: "pick a contact sensor", multiple: true
+    }
+
+	section("Select Acceleration"){
+	    input "accelerationSensor", "capability.accelerationSensor", multiple:true, title: "Sensors:"
+    }
+	section("Select Battery"){
+	    input "battery", "capability.battery", multiple:true, title: "Sensors with Battery:"
+    }
+	section("Select Power Meters"){
+	    input "power", "capability.powerMeter", multiple:true, title: "Power Meter Sensors:"
     }
 
 
@@ -58,100 +73,85 @@ def updated() {
 }
 
 def initialize() {
-	subscribe(sensors, "temperature", sensorHandler)
-    subscribe(humsensors, "humidity", humidityHandler)
-    subscribe(switches, "switch", switchHandler)
+	subscribe(sensors, "temperature", eventHandler)
+    subscribe(humsensors, "humidity", eventHandler)
+    subscribe(switches, "switch", eventHandler)
+    subscribe(accelerationSensor, "acceleration", eventHandler)
+    subscribe(contact, "contact", eventHandler)
+    subscribe(battery, "battery", eventHandler)
+    subscribe(power, "power", eventHandler)
+
 }
 
-def sendCommand(json) {
-  def headers = [:] //an empty map
-  headers.put("HOST", "${appSettings.esHost}:9200")
-  headers.put("Content-Type", "application/x-www-form-urlencoded")
+def issueLocalCommand(command) {
+  sendHubCommand(command)
+  return command
+}
 
-  //Send this json to Elasticsearch
-  def result = new physicalgraph.device.HubAction(
-    method: "POST",
-    path: "/${appSettings.esIndex}/${appSettings.esType}",
-    headers: headers,
-    body: json.toString()
-  )
+def sendInflux(data) {
+	def headers = [:]
+    headers.put("HOST", "${appSettings.dbHost}:8086")
+    headers.put("Content-Type", "application/x-www-form-urlencoded")
     
-  sendHubCommand(result)
-  return result
-}
-
-def sensorHandler(evt) {
-	def evtValue
-	try{
-		evtValue = evt.doubleValue
-	} catch (e) {
-		evtValue =  evt.stringValue
-	}
-
-    def json
-	try {
-		def data = [
-        	date: evt.isoDate,
-            name: evt.displayName,
-            event: [
-            	sensor: "temperature",
-                value: evtValue
-            ]
-        ]
-       json = new groovy.json.JsonBuilder(data)
-	   //log.debug "${json.toPrettyString()}"
-       sendCommand(json)
-    } catch (e) {
-       log.debug "Trying to build Json for ${evt.name} threw an exception: $e"
+    def body = ""
+    body = body.concat(data.event.sensor)
+    body = body.concat(",name=").concat(data.name.replace(" ","\\ "))
+    if (data.event.unit) {
+    	body = body.concat(",units=").concat(data.event.unit)
     }
-}
-
-def switchHandler(evt) {
-	def evtValue
-    def binValue
-   	evtValue = evt.stringValue
-    binValue = evt.value == "on" ? 1 : 0
-    log.debug "${evt.displayName} is status ${binValue}"
+    body = body.concat(",source=").concat("${data.source}")
+    body = body.concat(" ")
+    body = body.concat("value=").concat( data.event.binValue == null ? "${data.event.value}" : "${data.event.binValue}" )
+    body = body.concat(" ")
+    body = body.concat("${data.date}")
+    log.debug "${body}"
     
-    def json
-    try {
-    	def data = [
-        	date: evt.isoDate,
-            name: evt.displayName,
-            event: [
-            	sensor: "switch",
-                value: binValue
-              ]
-             ]
-        json = new groovy.json.JsonBuilder(data)
-        sendCommand(json)
-       } catch (e) {
-       log.debug "Trying to build Json for ${evt.name} threw an exception: $e"
-    }       
+    def result = new physicalgraph.device.HubAction(
+    	method: "POST",
+        path: "/write?db=${appSettings.dbIndex}&precision=ms",
+        headers: headers,
+        body: body
+    )
+    
+    return( issueLocalCommand(result) )
 }
 
-def humidityHandler(evt) {
+def eventHandler(evt) {
+
 	def evtValue
+    def binValue = null
 	try{
 		evtValue = evt.doubleValue
 	} catch (e) {
 		evtValue =  evt.stringValue
 	}
+    
+    switch(evtValue){
+    	case ["open","inactive","off"]:
+        	binValue = 0.0
+            break
+        case ["closed","active","on"]:
+        	binValue = 1.0
+            break
+    }
+    //log.debug "${binValue} : ${evtValue}"
 
-    def json
 	try {
 		def data = [
-        	date: evt.isoDate,
+        	date: evt.date.getTime(),
             name: evt.displayName,
+            source: evt.source,
             event: [
-            	sensor: "humidity",
-                value: evtValue
+            	sensor: evt.name,
+                value: evtValue,
+                binValue: binValue,
+                unit: evt.unit
             ]
         ]
-       json = new groovy.json.JsonBuilder(data)
-	   //log.debug "${json.toPrettyString()}"
-       sendCommand(json)
+        //log.debug "${data}"
+        
+        sendInflux(data)
     } catch (e) {
-       log.debug "Trying to build Json for ${evt.name} threw an exception: $e"
+       log.debug "Trying to build data for ${evt.name} threw an exception: $e"
     }
 }

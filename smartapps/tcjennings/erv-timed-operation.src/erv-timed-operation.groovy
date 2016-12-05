@@ -86,8 +86,23 @@ def routineChanged(evt) {
 
 def turnOffERV() {
 	log.debug "Turning off ERV switches."
-	erv.off()
-	hilo.off()
+	if (erv.currentSwitch == "on") { erv.off() }
+    if (hilo.currentSwitch == "on") { hilo.off() }
+    return true
+}
+
+def lowSpeedERV() {
+	log.debug "Putting ERV in low speed mode."
+	if (erv.currentSwitch == "off") { erv.on() }
+    if (hilo.currentSwitch == "on") { hilo.off() }
+    return true
+}
+
+def highSpeedERV() {
+	log.debug "Putting ERV in high speed mode."
+	if (erv.currentSwitch == "off") { erv.on() }
+    if (hilo.currentSwitch == "off") { hilo.on() }
+    return true
 }
 
 def periodicVentilation() {
@@ -95,14 +110,11 @@ def periodicVentilation() {
 	def DP = getCurrentDewPoint()
 	// Check outdoor Dew Point, and if it is above threshold, don't turn on the ERV.
 	if ( DP < getDewPointThreshold() ) {
-		// turn on the ERV's low-speed mode.
-		erv.on()
-		hilo.off()
-		// Using the 'pminutes' input, schedule a time to turn off the ERV
+        lowSpeedERV()
 		runIn(60 * findRunTime(), turnOffERV)
 	} else {
 		log.debug("Dew Point is too high for ventilation.")
-        sendPush("Dew Point is ${DP}, not ventilating this hour.")
+        //sendPush("Dew Point is ${DP}, not ventilating this hour.")
 		if (erv.currentSwitch == "on" ) { turnOffERV() }
 		return false
 	}
@@ -127,7 +139,7 @@ def getCurrentDewPoint() {
 	def staleThreshold = ( now() / 1000 ) - ( 60 * 45 )
 	def DP
 	if ( lastForecast < staleThreshold ) {
-    	sendPush("Application state is stale.")
+    	//sendPush("Application state is stale.")
 		DP = getWebForecast()
 	} else {
 		DP = state.dewpoint
@@ -142,8 +154,13 @@ def getDewPointThreshold() {
 
 //Validate runtime in minutes
 private findRunTime() {
-	(pminutes > 60) ? 60 : pminutes
-	(pminutes < 1 ) ? 1 : pminutes
+	if (pminutes > 60) {
+		return 60
+    } else if (pminutes < 1 ) {
+    	return 1 
+    } else {
+    	return pminutes
+    }
 }
 
 def getWebForecast() {
@@ -154,6 +171,7 @@ def getWebForecast() {
 	def responseRH
 	
 	log.debug "Checking Forecast.io weather."
+    //sendPush "Making an API call to Forecast.io."
 
 	httpGet(forecastURL) { response ->
 		if (response.data) {
